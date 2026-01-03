@@ -1,0 +1,111 @@
+// File: /prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"] // For vector search
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+enum ApplicationStatus {
+  APPLIED
+  INTERVIEWING
+  OFFER
+  REJECTED
+}
+
+enum JobType {
+  FULL_TIME
+  CONTRACT
+  FREELANCE
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  title         String?   // e.g., "Senior Software Engineer"
+  location      String?
+  isOpenToWork  Boolean   @default(false)
+  
+  resumes       Resume[]
+  applications  Application[]
+  profileStats  ProfileStats?
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model ProfileStats {
+  id                String @id @default(cuid())
+  userId            String @unique
+  profileViews      Int    @default(0)
+  searchAppearances Int    @default(0)
+  savedJobs         Int    @default(0)
+  user              User   @relation(fields: [userId], references: [id])
+}
+
+model Resume {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  fileUrl     String
+  parsedData  Json?    // Stores the 200+ data points from Skima/Affinda
+  skills      String[]
+  score       Int      @default(0)
+  
+  // Embedding for semantic matching (vector(1536) compatible with OpenAI)
+  embedding   Unsupported("vector(1536)")? 
+
+  createdAt   DateTime @default(now())
+}
+
+model Job {
+  id             String   @id @default(cuid())
+  title          String
+  company        String
+  location       String
+  isRemote       Boolean  @default(false)
+  type           JobType  @default(FULL_TIME)
+  description    String
+  
+  // EU Pay Transparency Compliance
+  salaryMin      Int
+  salaryMax      Int
+  currency       String   @default("USD")
+  
+  // Search Chips / Metadata
+  tags           String[] // e.g., "High Growth", "Series A"
+  
+  // Embedding for semantic matching
+  embedding      Unsupported("vector(1536)")?
+  
+  applications   Application[]
+  
+  createdAt      DateTime @default(now())
+}
+
+model Application {
+  id             String            @id @default(cuid())
+  userId         String
+  jobId          String
+  user           User              @relation(fields: [userId], references: [id])
+  job            Job               @relation(fields: [jobId], references: [id])
+  
+  status         ApplicationStatus @default(APPLIED)
+  progress       Int               @default(0) // 0-100%
+  
+  nextStep       String?           // e.g., "Design Challenge"
+  nextStepDate   DateTime?
+  
+  feedback       String?           // AI Generated feedback for rejections
+  
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  
+  @@unique([userId, jobId])
+}
