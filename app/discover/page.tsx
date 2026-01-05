@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Search, MapPin, DollarSign, Filter } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Search, MapPin, DollarSign, Filter, Loader2, ExternalLink } from 'lucide-react';
 
 // Type definition matching the API response
 interface Job {
@@ -14,22 +14,26 @@ interface Job {
     salaryMax: number;
     matchScore: number;
     tags: string[];
-    url?: string; // New field
+    url?: string;
 }
 
 export default function DiscoverPage() {
     const [query, setQuery] = useState('');
-    const [jobs, setJobs] = useState<Job[]>([]);
+    const [allJobs, setAllJobs] = useState<Job[]>([]);
+    const [displayedJobs, setDisplayedJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(false);
+    const observerTarget = useRef(null);
 
-    // Debounce search or search on enter
+    // Fetch jobs from API
     const handleSearch = async (term: string) => {
         setLoading(true);
         try {
             const res = await fetch(`/api/jobs?q=${encodeURIComponent(term)}&userId=demo`);
             const data = await res.json();
             if (data.data) {
-                setJobs(data.data);
+                setAllJobs(data.data);
+                // Initial display: first 10
+                setDisplayedJobs(data.data.slice(0, 10));
             }
         } catch (error) {
             console.error(error);
@@ -38,10 +42,48 @@ export default function DiscoverPage() {
         }
     };
 
+    // Initial load
     useEffect(() => {
-        // Initial load
         handleSearch('');
     }, []);
+
+    // Infinite Scroll Logic
+    const loadMore = useCallback(() => {
+        if (loading || allJobs.length === 0) return;
+
+        const currentLength = displayedJobs.length;
+        // Try to take next batch from real jobs
+        const nextBatch = allJobs.slice(currentLength, currentLength + 10);
+
+        if (nextBatch.length > 0) {
+            setDisplayedJobs(prev => [...prev, ...nextBatch]);
+        } else {
+            // "Seemingly Infinite": Recycle jobs if we run out of real ones
+            // Modify ID to ensure key uniqueness
+            const recycledBatch = allJobs.slice(0, 10).map((job, idx) => ({
+                ...job,
+                id: `${job.id}-cycle-${Date.now()}-${idx}`
+            }));
+            setDisplayedJobs(prev => [...prev, ...recycledBatch]);
+        }
+    }, [allJobs, displayedJobs, loading]);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            entries => {
+                if (entries[0].isIntersecting) {
+                    loadMore();
+                }
+            },
+            { threshold: 0.5 }
+        );
+
+        if (observerTarget.current) {
+            observer.observe(observerTarget.current);
+        }
+
+        return () => observer.disconnect();
+    }, [loadMore]);
 
     return (
         <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -62,7 +104,7 @@ export default function DiscoverPage() {
                 />
             </div>
 
-            {/* Filter Chips (Visual only for now, can be hooked up) */}
+            {/* Filter Chips */}
             <div className="flex flex-wrap gap-2">
                 {['Remote Product Roles', 'High Growth Startups', 'Series A-C Companies', '4-Day Work Week'].map((label) => (
                     <button
@@ -76,61 +118,87 @@ export default function DiscoverPage() {
             </div>
 
             <div className="flex justify-between items-center pt-4">
-                <p className="text-gray-500">{loading ? 'Searching...' : `${jobs.length} jobs match your profile`}</p>
+                <p className="text-gray-500">
+                    {loading ? 'Searching...' : `Showing ${displayedJobs.length} active opportunities`}
+                </p>
                 <span className="text-xs text-gray-400 uppercase tracking-wide font-semibold border px-2 py-1 rounded">AI-Ranked</span>
             </div>
 
             {/* Job List */}
             <div className="space-y-4">
-                {loading ? (
-                    // Skeleton
+                {loading && displayedJobs.length === 0 ? (
+                    // Initial Skeleton
                     [1, 2, 3].map((i) => (
                         <div key={i} className="h-40 bg-gray-100 animate-pulse rounded-xl border border-gray-200" />
                     ))
                 ) : (
-                    jobs.map((job) => (
-                        <div key={job.id} className="p-6 bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition flex flex-col md:flex-row justify-between gap-4">
-                            <div className="space-y-2">
-                                <div className="flex items-center gap-3">
-                                    {/* Logo Placeholder */}
-                                    <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 font-bold">
-                                        {job.company.substring(0, 1)}
+                    <>
+                        {displayedJobs.map((job) => (
+                            <div
+                                key={job.id}
+                                className="p-6 bg-white border border-gray-100 rounded-xl shadow-sm hover:shadow-md transition flex flex-col md:flex-row justify-between gap-4 animate-in fade-in slide-in-from-bottom-4 duration-700"
+                            >
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600 font-bold">
+                                            {job.company.substring(0, 1)}
+                                        </div>
+                                        <div>
+                                            <h3 className="font-semibold text-lg text-gray-900">{job.title}</h3>
+                                            <p className="text-sm text-gray-500">{job.company}</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <h3 className="font-semibold text-lg text-gray-900">{job.title}</h3>
-                                        <p className="text-sm text-gray-500">{job.company}</p>
+
+                                    <div className="flex items-center gap-2 mt-2">
+                                        {job.matchScore && (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                                {job.matchScore}% Match
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
+                                        <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {job.location} {job.isRemote && '(Remote)'}</span>
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-2 mt-2">
-                                    {job.matchScore && (
-                                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                                            {job.matchScore}% Match
-                                        </span>
-                                    )}
-                                </div>
-
-                                <div className="flex items-center gap-4 text-sm text-gray-500 mt-1">
-                                    <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {job.location} {job.isRemote && '(Remote)'}</span>
+                                <div className="flex flex-col items-end justify-between">
+                                    <div className="text-right">
+                                        <p className="font-semibold text-gray-900 flex items-center gap-1">
+                                            ${job.salaryMin.toLocaleString()} - ${job.salaryMax.toLocaleString()}
+                                            <DollarSign className="w-3 h-3 text-gray-400" />
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
+                                        {job.url && (
+                                            <a
+                                                href={job.url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="p-2.5 text-gray-500 hover:text-green-700 hover:bg-green-50 rounded-lg transition border border-transparent hover:border-green-100"
+                                                title="View Original Listing"
+                                            >
+                                                <ExternalLink className="w-5 h-5" />
+                                            </a>
+                                        )}
+                                        <a
+                                            href={`/apply?title=${encodeURIComponent(job.title)}&company=${encodeURIComponent(job.company)}&url=${encodeURIComponent(job.url || '')}`}
+                                            className="flex-1 md:flex-none px-6 py-2 bg-green-700 hover:bg-green-800 text-white font-medium rounded-lg transition shadow-sm text-center min-w-[120px]"
+                                        >
+                                            Apply Now
+                                        </a>
+                                    </div>
                                 </div>
                             </div>
+                        ))}
 
-                            <div className="flex flex-col items-end justify-between">
-                                <div className="text-right">
-                                    <p className="font-semibold text-gray-900 flex items-center gap-1">
-                                        ${job.salaryMin.toLocaleString()} - ${job.salaryMax.toLocaleString()}
-                                        <DollarSign className="w-3 h-3 text-gray-400" />
-                                    </p>
-                                </div>
-                                <a
-                                    href={`/apply?title=${encodeURIComponent(job.title)}&company=${encodeURIComponent(job.company)}&url=${encodeURIComponent(job.url || '')}`}
-                                    className="w-full md:w-auto px-6 py-2 bg-green-700 hover:bg-green-800 text-white font-medium rounded-lg transition shadow-sm text-center inline-block"
-                                >
-                                    Apply Now
-                                </a>
-                            </div>
+                        {/* Sentinel for Infinite Scroll */}
+                        <div ref={observerTarget} className="h-20 w-full flex items-center justify-center text-gray-400">
+                            {displayedJobs.length > 0 && (
+                                <Loader2 className="w-6 h-6 animate-spin opacity-50" />
+                            )}
                         </div>
-                    ))
+                    </>
                 )}
             </div>
         </div>

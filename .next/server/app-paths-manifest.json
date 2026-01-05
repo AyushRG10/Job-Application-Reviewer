@@ -1,10 +1,5 @@
 {
-  "/profile/page": "app/profile/page.js",
-  "/applications/page": "app/applications/page.js",
-  "/resume/page": "app/resume/page.js",
-  "/apply/page": "app/apply/page.js",
-  "/api/resume/route": "app/api/resume/route.js",
-  "/api/tracker/route": "app/api/tracker/route.js",
+  "/discover/page": "app/discover/page.js",
   "/api/jobs/route": "app/api/jobs/route.js",
-  "/discover/page": "app/discover/page.js"
+  "/apply/page": "app/apply/page.js"
 }
